@@ -1,0 +1,10 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      # Essenziale per permettere al container di leggere gli account Cockpit dell'host
+      - ~/.antigravity_cockpit:/home/nuxtjs/.antigravity_cockpit:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
