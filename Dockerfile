@@ -6,6 +6,8 @@ COPY . .
 RUN bun run build
 
 FROM oven/bun:1-alpine
+LABEL org.opencontainers.image.source=https://github.com/darkrei08/nuxt-cockpit-agent-starter
+LABEL org.opencontainers.image.description="Nuxt Cockpit Agent Starter"
 WORKDIR /app
 COPY --from=builder /app/.output ./.output
 EXPOSE 3000
