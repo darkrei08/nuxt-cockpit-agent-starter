@@ -118,15 +118,80 @@
           Nessun account Cockpit rilevato. Assicurati che il demone sia in esecuzione o che i volumi Docker siano mappati correttamente.
         </div>
       </section>
+
+      <!-- Chat & Test Sandbox Section -->
+      <section class="bg-[#1E293B] rounded-2xl p-6 border border-white/5 space-y-6">
+        <h2 class="text-lg font-semibold flex items-center gap-2 text-gray-200">
+          💬 Cockpit AI Sandbox & Multi-Model Testing
+        </h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1">Modello LLM (Catalogo)</label>
+            <select v-model="selectedModel" class="w-full bg-[#0F172A] border border-white/10 rounded-xl p-3 text-sm focus:border-blue-500 outline-none text-gray-200">
+              <optgroup v-for="group in modelGroups" :key="group.category" :label="`${group.icon} ${group.label}`">
+                <option v-for="m in group.models" :key="m.id" :value="m.id">{{ m.name }} ({{ m.provider }})</option>
+              </optgroup>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-purple-400 uppercase tracking-wider mb-1">Modalità di Ragionamento</label>
+            <select v-model="reasoningMode" class="w-full bg-[#0F172A] border border-white/10 rounded-xl p-3 text-sm focus:border-purple-500 outline-none text-gray-200">
+              <option value="standard">⚡ Standard / Bilanciato</option>
+              <option value="creative">🎨 Creativo / Copywriting</option>
+              <option value="analytical">🧠 Analitico / Matematico</option>
+              <option value="antiban">🛡️ Anti-Ban Stealth Max (2026)</option>
+              <option value="cot">🔍 Chain-of-Thought (&lt;ragionamento&gt;)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1">Preset Prompt Professionali</label>
+            <select v-model="promptCategory" class="w-full bg-[#0F172A] border border-white/10 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none text-gray-200">
+              <option v-for="prompt in PROMPT_INDEX" :key="prompt.id" :value="prompt.id">{{ prompt.name }}</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="bg-[#0F172A] rounded-xl p-4 min-h-[160px] max-h-[300px] overflow-y-auto space-y-3 border border-white/5">
+          <div v-for="(msg, idx) in messages" :key="idx" class="p-3 rounded-xl text-sm font-mono whitespace-pre-wrap"
+               :class="msg.role === 'user' ? 'bg-blue-600/20 text-blue-100 ml-auto max-w-[85%]' : 'bg-white/5 text-gray-200 max-w-[90%]'">
+            <div class="text-[10px] font-bold uppercase tracking-wider mb-1" :class="msg.role === 'user' ? 'text-blue-400' : 'text-emerald-400'">
+              {{ msg.role === 'user' ? 'Tu' : 'Cockpit AI' }}
+            </div>
+            {{ msg.content }}
+          </div>
+          <p v-if="!messages.length" class="text-xs text-gray-500 text-center py-8">Nessun messaggio. Scrivi qui sotto per testare l'instradamento Cockpit!</p>
+        </div>
+
+        <form @submit.prevent="sendMessage" class="flex gap-3">
+          <input v-model="input" type="text" placeholder="Scrivi una richiesta per testare il modello e le quote..."
+                 class="flex-1 bg-[#0F172A] border border-white/10 rounded-xl p-3.5 text-sm focus:border-blue-500 outline-none text-gray-100" />
+          <button type="submit" :disabled="loading || !input"
+                  class="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium px-6 py-3.5 rounded-xl transition-all">
+            {{ loading ? '...' : 'Invia' }}
+          </button>
+        </form>
+      </section>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
+import { getModelsGroupedByCategory, LlmModelEntry } from '~/lib/llm-models'
+import { PROMPT_INDEX } from '~/lib/prompt-registry'
 
 const cockpitStatus = ref({ available: false, accounts: [] as any[] })
 const selectedAccountId = ref('')
+
+const dynamicModels = ref<LlmModelEntry[]>([])
+const selectedModel = ref('gpt-4o-mini')
+const reasoningMode = ref('standard')
+const promptCategory = ref('cockpit-multiaccount-agent')
+const input = ref('')
+const messages = ref<{role: string, content: string}[]>([])
+const loading = ref(false)
+
+const modelGroups = computed(() => getModelsGroupedByCategory('openai', dynamicModels.value.length ? dynamicModels.value : undefined))
 
 function getModelQuota(acc: any, modelName: string) {
   if (!acc.quota) return null
@@ -140,7 +205,70 @@ function formatDate(isoStr: string) {
   return `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
 }
 
+async function fetchCatalog() {
+  try {
+    const res = await $fetch<{data: LlmModelEntry[]}>('/api/models')
+    if (res && res.data) {
+      dynamicModels.value = res.data
+      if (res.data.length > 0) selectedModel.value = res.data[0].id
+    }
+  } catch (e) {}
+}
+
+async function sendMessage() {
+  if (!input.value.trim() || loading.value) return
+  const userText = input.value
+  messages.value.push({ role: 'user', content: userText })
+  input.value = ''
+  loading.value = true
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: userText,
+        accountId: selectedAccountId.value,
+        model: selectedModel.value,
+        modelOverride: selectedModel.value,
+        reasoningMode: reasoningMode.value,
+        promptCategory: promptCategory.value
+      })
+    })
+
+    const reader = res.body?.getReader()
+    const decoder = new TextDecoder()
+    if (reader) {
+      let buffer = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6))
+              if (data.type === 'complete') {
+                messages.value.push({ role: 'assistant', content: data.result })
+              } else if (data.type === 'error') {
+                messages.value.push({ role: 'assistant', content: `Error: ${data.error}` })
+              }
+            } catch (e) {}
+          }
+        }
+      }
+    }
+  } catch (e: any) {
+    messages.value.push({ role: 'assistant', content: `Error: ${e.message}` })
+  } finally {
+    loading.value = false
+  }
+}
+
 onMounted(async () => {
+  fetchCatalog()
   try {
     const res = await $fetch('/api/cockpit')
     if (res && res.data) {
