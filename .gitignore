@@ -12,3 +12,4 @@ credentials.json
 .cursor/
 .gemini/
 .vscode/
+package-lock.json
